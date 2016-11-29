@@ -10,11 +10,16 @@ import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
 import android.support.v7.widget.GridLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.SearchView;
 import android.util.Log;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.ProgressBar;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +39,7 @@ public class PhotoGalleryFragment extends Fragment {
     private ThumbnailDownloader<PhotoHolder> mThumbnailDownloader;
     private boolean mLoading = true;
     private int mPage = 1;
+    private ProgressBar mProgressBar;
     int mPastVisibleItems, mVisibleItemCount, mTotalItemCount;
 
     public static PhotoGalleryFragment newInstance() {
@@ -44,7 +50,8 @@ public class PhotoGalleryFragment extends Fragment {
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setRetainInstance(true);
-        new FetchItemsTask().execute(mPage);
+        setHasOptionsMenu(true);
+        updateItems();
 
         Handler responseHandler = new Handler();
         mThumbnailDownloader = new ThumbnailDownloader<>(responseHandler);
@@ -68,6 +75,7 @@ public class PhotoGalleryFragment extends Fragment {
 
         View v = inflater.inflate(R.layout.fragment_photo_gallery, container, false);
 
+        mProgressBar = (ProgressBar) v.findViewById(R.id.progress_bar);
         mPhotoRecyclerView = (RecyclerView) v
                 .findViewById(R.id.fragment_photo_gallery_recycler_view);
         mGridLayoutManager = new GridLayoutManager(getActivity(), /*spanCount=*/3);
@@ -87,7 +95,7 @@ public class PhotoGalleryFragment extends Fragment {
                         if ((mVisibleItemCount + mPastVisibleItems) >= mTotalItemCount) {
                             mLoading = false;
                             mPage++;
-                            new FetchItemsTask().execute(mPage);
+                            updateItems();
                         }
                     }
                 }
@@ -97,6 +105,60 @@ public class PhotoGalleryFragment extends Fragment {
         setupAdapter();
 
         return v;
+    }
+
+    @Override
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
+        super.onCreateOptionsMenu(menu, inflater);
+        inflater.inflate(R.menu.fragment_photo_gallery, menu);
+
+        MenuItem searchItem = menu.findItem(R.id.menu_item_search);
+        final SearchView searchView = (SearchView) searchItem.getActionView();
+
+        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override
+            public boolean onQueryTextSubmit(String query) {
+                Log.d(TAG, "QueryTextSubmit: " + query);
+                QueryPreferences.setStoredQuery(getActivity(), query);
+                updateItems();
+                searchView.onActionViewCollapsed();
+                mItems.clear();
+                mAdapter.notifyDataSetChanged();
+                mProgressBar.setVisibility(View.VISIBLE);
+                return true;
+            }
+
+            @Override
+            public boolean onQueryTextChange(String newText) {
+                Log.d(TAG, "QueryTextChange: " + newText);
+                return false;
+            }
+        });
+
+        searchView.setOnSearchClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String query = QueryPreferences.getStoredQuery(getActivity());
+                searchView.setQuery(query, false);
+            }
+        });
+    }
+
+    private void updateItems() {
+        String query = QueryPreferences.getStoredQuery(getActivity());
+        new FetchItemsTask(query).execute();
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.menu_item_clear:
+                QueryPreferences.setStoredQuery(getActivity(), null);
+                updateItems();
+                return true;
+            default:
+                return super.onOptionsItemSelected(item);
+        }
     }
 
     @Override
@@ -114,6 +176,11 @@ public class PhotoGalleryFragment extends Fragment {
 
     private void setupAdapter() {
         if (isAdded()) {
+            if (mItems.size() <= 0) {
+                mProgressBar.setVisibility(View.VISIBLE);
+            } else {
+                mProgressBar.setVisibility(View.GONE);
+            }
             mAdapter = new PhotoAdapter((mItems));
             mPhotoRecyclerView.setAdapter(mAdapter);
         }
@@ -162,23 +229,34 @@ public class PhotoGalleryFragment extends Fragment {
         }
     }
 
-    private class FetchItemsTask extends AsyncTask<Integer, Void, List<GalleryItem>> {
+    private class FetchItemsTask extends AsyncTask<Void, Void, List<GalleryItem>> {
+
+        private String mQuery;
+
+        public FetchItemsTask(String query) {
+            mQuery = query;
+        }
 
         @Override
-        protected List<GalleryItem> doInBackground(Integer... page) {
-            return new FlickrFetchr().fetchItems(page[0]);
+        protected List<GalleryItem> doInBackground(Void... params) {
+            if (mQuery == null) {
+                return new FlickrFetchr().fetchRecentPhotos(mPage);
+            } else {
+                return new FlickrFetchr().searchPhotos(mQuery, mPage);
+            }
         }
 
         @Override
         protected void onPostExecute(List<GalleryItem> galleryItems) {
             mLoading = true;
-            if (mItems.size() <= 0) {
-                mItems = galleryItems;
+            boolean isFresh = mItems.size() == 0;
+            mItems.addAll(galleryItems);
+            if (isFresh) {
                 setupAdapter();
             } else {
-                mItems.addAll(galleryItems);
                 mAdapter.notifyDataSetChanged();
             }
+            mProgressBar.setVisibility(View.GONE);
         }
     }
 }
