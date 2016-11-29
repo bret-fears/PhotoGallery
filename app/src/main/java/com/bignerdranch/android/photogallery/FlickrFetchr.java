@@ -19,6 +19,16 @@ import java.util.List;
 public class FlickrFetchr {
 
     private static final String TAG = "FlickrFetchr";
+    private static final String FETCH_RECENT_METHOD = "flickr.photos.getRecent";
+    private static final String SEARCH_METHOD = "flickr.photos.search";
+    private static final Uri ENDPOINT = Uri
+            .parse("https://api.flickr.com/services/rest")
+            .buildUpon()
+            .appendQueryParameter("api_key", BuildConfig.FLICKR_API_KEY)
+            .appendQueryParameter("format", "json")
+            .appendQueryParameter("nojsoncallback", "1")
+            .appendQueryParameter("extras", "url_s")
+            .build();
 
     private Gson mGson = new Gson();
 
@@ -51,19 +61,20 @@ public class FlickrFetchr {
         return new String(getUrlBytes(urlSpec));
     }
 
-    public List<GalleryItem> fetchItems(Integer page) {
+    public List<GalleryItem> fetchRecentPhotos(Integer page) {
+        String url = buildUrl(FETCH_RECENT_METHOD, null, page);
+        return downloadGalleryItems(url);
+    }
+
+    public List<GalleryItem> searchPhotos(String query, Integer page) {
+        String url = buildUrl(SEARCH_METHOD, query, page);
+        return downloadGalleryItems(url);
+    }
+
+    private List<GalleryItem> downloadGalleryItems(String url) {
         GalleryPhotos galleryPhotos = new GalleryPhotos();
 
         try {
-            String url = Uri.parse("https://api.flickr.com/services/rest")
-                    .buildUpon()
-                    .appendQueryParameter("method", "flickr.photos.getRecent")
-                    .appendQueryParameter("api_key", BuildConfig.FLICKR_API_KEY)
-                    .appendQueryParameter("format", "json")
-                    .appendQueryParameter("nojsoncallback", "1")
-                    .appendQueryParameter("page", page.toString())
-                    .appendQueryParameter("extras", "url_s")
-                    .build().toString();
             String jsonString = getUrlString(url);
             Log.i(TAG, "Received JSON: " + jsonString);
             galleryPhotos = mGson.fromJson(jsonString, GalleryPhotos.class);
@@ -72,6 +83,18 @@ public class FlickrFetchr {
         }
 
         return galleryPhotos.getPhoto().getGalleryItems();
+    }
+
+    private String buildUrl(String method, String query, Integer page) {
+        Uri.Builder uriBuilder = ENDPOINT.buildUpon()
+                .appendQueryParameter("method", method);
+
+        if (method.equals(SEARCH_METHOD)) {
+            uriBuilder.appendQueryParameter("text", query);
+        }
+        uriBuilder.appendQueryParameter("page", page.toString());
+
+        return uriBuilder.build().toString();
     }
 
 }
